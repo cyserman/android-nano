@@ -4,6 +4,9 @@
 # ║   Target: Samsung S24 Ultra via Termux                                 ║
 # ║   Run this once inside Termux to install and daemonize NanoClaw        ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# WhatsApp Note: WhatsApp uses server-side webhooks. Your messages come
+# through the webhook to your deployed app. No polling needed on device!
 
 set -e
 
@@ -41,12 +44,13 @@ step() { echo -e "\n${BOLD}${CYAN}━━ $1 ━━${RESET}"; }
 # ── Step 1: Bootstrap Termux packages ────────────────────────────────────────
 step "Bootstrapping Termux"
 pkg update -y -q && pkg upgrade -y -q
-pkg install -y -q curl wget git nodejs-lts python termux-api termux-services
+pkg install -y -q curl wget git python3 termux-api termux-services openssh
 log "Termux packages installed"
 
 # ── Step 2: Create NanoClaw directory ────────────────────────────────────────
 step "Creating NanoClaw home"
 mkdir -p "$NANOCLAW_DIR"
+mkdir -p "$HOME/bin"
 log "Directory: $NANOCLAW_DIR"
 
 # ── Step 3: Configure ────────────────────────────────────────────────────────
@@ -56,19 +60,29 @@ if [ -f "$CONFIG_FILE" ]; then
   warn "Config exists at $CONFIG_FILE — skipping (delete to reconfigure)"
 else
   echo ""
+  echo -e "  ${BOLD}WhatsApp Setup (Meta Developer Console):${RESET}"
+  echo "  1. Go to developers.facebook.com → My Apps → Create App"
+  echo "  2. Select 'Other' → 'Business' → Create"
+  echo "  3. Add WhatsApp product to your app"
+  echo "  4. Get Phone Number ID and Access Token"
+  echo ""
   echo -e "  Enter your settings (press Enter to skip optional items):"
   echo ""
 
   read -r -p "  NanoClaw URL [required]: " input_url
-  read -r -p "  Telegram Bot Token [optional]: " input_tg_token
-  read -r -p "  Your Telegram Chat ID [optional]: " input_tg_chat
+  read -r -p "  WhatsApp Phone Number ID [from Meta]: " input_wa_pnid
+  read -r -p "  WhatsApp Access Token [from Meta]: " input_wa_token
+  read -r -p "  Your WhatsApp phone number [+1234567890]: " input_wa_phone
+  read -r -p "  WhatsApp Verify Token [any secret]: " input_wa_verify
   read -r -p "  OpenAI API Key [optional]: " input_openai
 
   cat > "$CONFIG_FILE" << ENVEOF
 # NanoClaw Configuration
 NANOCLAW_URL="${input_url:-$SERVICE_URL}"
-TELEGRAM_BOT_TOKEN="${input_tg_token}"
-TELEGRAM_CHAT_ID="${input_tg_chat}"
+WHATSAPP_PHONE_NUMBER_ID="${input_wa_pnid}"
+WHATSAPP_ACCESS_TOKEN="${input_wa_token}"
+WHATSAPP_AUTHORIZED_PHONE="${input_wa_phone}"
+WHATSAPP_VERIFY_TOKEN="${input_wa_verify:-nanoclaw_verify_token}"
 OPENAI_API_KEY="${input_openai}"
 NANOCLAW_VERSION="1.0.0"
 ENVEOF
@@ -109,77 +123,11 @@ else
 fi
 CLIPEOF
 
+chmod +x "$HOME/bin/bin/nanoclaw" 2>/dev/null || true
 chmod +x "$HOME/bin/nanoclaw"
-mkdir -p "$HOME/bin"
 log "nanoclaw CLI installed → run: nanoclaw 'your message'"
 
-# ── Step 5: Telegram daemon ───────────────────────────────────────────────────
-step "Setting up persistent Telegram webhook poller"
-
-cat > "$NANOCLAW_DIR/telegram-poll.sh" << 'POLLEOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Telegram long-poll daemon for NanoClaw
-# Runs continuously — survives screen/tmux sessions
-
-source "$HOME/.nanoclaw/config.env" 2>/dev/null
-
-TOKEN="$TELEGRAM_BOT_TOKEN"
-URL="${NANOCLAW_URL}"
-OFFSET=0
-LOG="$HOME/.nanoclaw/nanoclaw.log"
-
-[ -z "$TOKEN" ] && { echo "No TELEGRAM_BOT_TOKEN set" >> "$LOG"; exit 1; }
-
-echo "[$(date)] NanoClaw Telegram daemon started" >> "$LOG"
-
-while true; do
-  UPDATES=$(curl -s "https://api.telegram.org/bot${TOKEN}/getUpdates?offset=${OFFSET}&timeout=30&allowed_updates=[\"message\",\"callback_query\"]")
-
-  RESULT_COUNT=$(echo "$UPDATES" | python3 -c "
-import sys,json
-try:
-  d=json.load(sys.stdin)
-  r=d.get('result',[])
-  print(len(r))
-  for u in r:
-    print('UPDATE',u.get('update_id',''))
-except:
-  print(0)
-" 2>/dev/null | head -1)
-
-  if [ "$RESULT_COUNT" -gt "0" ] 2>/dev/null; then
-    # Forward each update to NanoClaw webhook handler
-    echo "$UPDATES" | python3 -c "
-import sys,json,subprocess,urllib.request
-
-data=json.load(sys.stdin)
-results=data.get('result',[])
-for u in results:
-  body=json.dumps(u).encode()
-  req=urllib.request.Request(
-    '${URL}/api/telegram',
-    data=body,
-    headers={'Content-Type':'application/json'},
-    method='POST'
-  )
-  try:
-    urllib.request.urlopen(req, timeout=10)
-  except Exception as e:
-    pass
-  print('OFFSET', u.get('update_id',0)+1)
-" 2>>"$LOG" | while read -r line; do
-      [[ "$line" == OFFSET* ]] && OFFSET="${line#OFFSET }"
-    done
-  fi
-
-  sleep 1
-done
-POLLEOF
-
-chmod +x "$NANOCLAW_DIR/telegram-poll.sh"
-log "Telegram poller script created"
-
-# ── Step 6: Daily brief cron ──────────────────────────────────────────────────
+# ── Step 5: Daily brief cron ────────────────────────────────────────────────
 step "Scheduling daily brief"
 
 BRIEF_SCRIPT="$NANOCLAW_DIR/daily-brief.sh"
@@ -192,11 +140,11 @@ BRIEF=\$(curl -s "\${NANOCLAW_URL}/api/assistant" \
   -d '{"message":"Generate my daily brief with tasks and opportunities","sessionId":"daily_brief","channel":"web"}' | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message','Brief unavailable'))")
 
-# Send to Telegram if configured
-if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
-  curl -s -X POST "https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/sendMessage" \
+# Send to WhatsApp if configured
+if [ -n "\$WHATSAPP_ACCESS_TOKEN" ] && [ -n "\$WHATSAPP_AUTHORIZED_PHONE" ]; then
+  curl -s -X POST "\${NANOCLAW_URL}/api/whatsapp/send" \
     -H "Content-Type: application/json" \
-    -d "{\"chat_id\": \"\$TELEGRAM_CHAT_ID\", \"text\": \"\$BRIEF\", \"parse_mode\": \"Markdown\"}" > /dev/null
+    -d "{\"to\": \"\$WHATSAPP_AUTHORIZED_PHONE\", \"message\": \"\$BRIEF\"}" > /dev/null 2>&1
 fi
 
 echo "[\$(date)] Daily brief sent" >> "\$HOME/.nanoclaw/nanoclaw.log"
@@ -208,43 +156,52 @@ chmod +x "$BRIEF_SCRIPT"
 (crontab -l 2>/dev/null; echo "0 8 * * * $BRIEF_SCRIPT") | crontab -
 log "Daily brief scheduled at 08:00"
 
-# ── Step 7: Termux boot service ───────────────────────────────────────────────
-step "Configuring auto-start on device boot"
+# ── Step 6: Termux boot service ─────────────────────────────────────────────
+step "Configuring auto-start (optional)"
 
 mkdir -p "$HOME/.termux/boot"
 
 cat > "$HOME/.termux/boot/nanoclaw-start.sh" << BOOTEOF
 #!/data/data/com.termux/files/usr/bin/bash
-# Auto-starts NanoClaw daemon on Termux:Boot
+# Auto-starts NanoClaw services on Termux boot
 
 source "\$HOME/.nanoclaw/config.env" 2>/dev/null
 
-# Start Telegram polling daemon in background
-nohup "\$HOME/.nanoclaw/telegram-poll.sh" >> "\$HOME/.nanoclaw/nanoclaw.log" 2>&1 &
-echo \$! > "\$HOME/.nanoclaw/nanoclaw.pid"
+echo "[\$(date)] NanoClaw boot service started" >> "\$HOME/.nanoclaw/nanoclaw.log"
 
-echo "[\$(date)] NanoClaw daemon started (PID: \$!)" >> "\$HOME/.nanoclaw/nanoclaw.log"
-
-# Wake lock to prevent Android from killing the process
+# Wake lock to prevent Android from killing processes
 termux-wake-lock 2>/dev/null || true
 BOOTEOF
 
 chmod +x "$HOME/.termux/boot/nanoclaw-start.sh"
 log "Boot service installed → install Termux:Boot from F-Droid for auto-start"
 
-# ── Step 8: Start daemon now ──────────────────────────────────────────────────
-step "Starting NanoClaw daemon"
+# ── Step 7: WhatsApp webhook verification ───────────────────────────────────
+step "WhatsApp Webhook Setup"
 
-# Kill existing instance
-if [ -f "$PID_FILE" ]; then
-  OLD_PID=$(cat "$PID_FILE")
-  kill "$OLD_PID" 2>/dev/null || true
+echo ""
+echo -e "  ${BOLD}To complete WhatsApp setup:${RESET}"
+echo "  1. Go to your WhatsApp product in Meta Developer Console"
+echo "  2. Navigate to Configuration → Webhooks"
+echo "  3. Click 'Edit' and enter your callback URL:"
+echo ""
+echo -e "    ${CYAN}${NANOCLAW_URL}/api/telegram${RESET}"
+echo ""
+echo "  4. For 'Verify Token', use: ${WHATSAPP_VERIFY_TOKEN:-nanoclaw_verify_token}"
+echo "  5. Click 'Verify and Save'"
+echo "  6. Click 'Manage' next to your phone number → 'Edit' → Subscribe to webhooks"
+echo "  7. Subscribe to: messages"
+echo ""
+
+# Verify webhook is reachable
+log "Testing webhook endpoint..."
+TEST_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${NANOCLAW_URL}/api/telegram" || echo "000")
+if [ "$TEST_RESPONSE" = "200" ] || [ "$TEST_RESPONSE" = "403" ]; then
+  log "Webhook endpoint is reachable (got HTTP $TEST_RESPONSE)"
+else
+  warn "Webhook may not be reachable (HTTP $TEST_RESPONSE)"
+  warn "Make sure your app is deployed and the URL is correct"
 fi
-
-nohup "$NANOCLAW_DIR/telegram-poll.sh" >> "$LOG_FILE" 2>&1 &
-DAEMON_PID=$!
-echo "$DAEMON_PID" > "$PID_FILE"
-log "Daemon started (PID: $DAEMON_PID)"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -257,13 +214,15 @@ echo -e "    ${CYAN}nanoclaw 'what should I work on today?'${RESET}"
 echo -e "    ${CYAN}nanoclaw 'find me a revenue opportunity'${RESET}"
 echo -e "    ${CYAN}nanoclaw 'help me debug this Python script'${RESET}"
 echo ""
-echo -e "  ${BOLD}Daemon:${RESET}"
-echo -e "    Status:  ${CYAN}cat $LOG_FILE${RESET}"
-echo -e "    Stop:    ${CYAN}kill \$(cat $PID_FILE)${RESET}"
-echo -e "    Restart: ${CYAN}bash $NANOCLAW_DIR/telegram-poll.sh &${RESET}"
+echo -e "  ${BOLD}WhatsApp:${RESET}"
+echo -e "    Message your WhatsApp Business number"
+echo -e "    NanoClaw will respond via the webhook"
+echo ""
+echo -e "  ${BOLD}Daily brief:${RESET}"
+echo -e "    Auto-sends at 08:00 to your WhatsApp"
 echo ""
 echo -e "  ${BOLD}Next steps:${RESET}"
-echo -e "    1. Install ${CYAN}Termux:Boot${RESET} from F-Droid"
-echo -e "    2. Open Telegram → find your bot → /start"
-echo -e "    3. Set ${CYAN}OPENAI_API_KEY${RESET} in $CONFIG_FILE for full AI"
+echo -e "    1. Configure WhatsApp webhook (see above)"
+echo -e "    2. Set ${CYAN}OPENAI_API_KEY${RESET} in $CONFIG_FILE for full AI"
+echo -e "    3. Install ${CYAN}Termux:Boot${RESET} from F-Droid for auto-start"
 echo ""

@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as {
       message: string;
       sessionId?: string;
-      channel?: "web" | "telegram" | "gmail";
+      channel?: "web" | "telegram" | "gmail" | "whatsapp";
     };
 
     if (!body.message?.trim()) {

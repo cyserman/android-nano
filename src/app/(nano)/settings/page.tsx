@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Copy,
   RefreshCw,
+  MessageCircle,
 } from "lucide-react";
 
 interface StatusBadge {
@@ -25,7 +26,7 @@ interface StatusBadge {
 
 const STATUS_ITEMS = [
   { key: "openai", icon: Key, label: "OpenAI API Key", env: "OPENAI_API_KEY", description: "Powers all AI responses" },
-  { key: "telegram", icon: Send, label: "Telegram Bot", env: "TELEGRAM_BOT_TOKEN", description: "Receive and send messages" },
+  { key: "whatsapp", icon: MessageCircle, label: "WhatsApp Business", env: "WHATSAPP_ACCESS_TOKEN", description: "Receive & send via WhatsApp" },
   { key: "gmail", icon: Mail, label: "Gmail (andycodebot)", env: "GMAIL_ACCESS_TOKEN", description: "andycodebot@gmail.com" },
 ];
 
@@ -42,13 +43,13 @@ export default function SettingsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const registerWebhook = async () => {
+  const checkWebhook = async () => {
     setWebhookLoading(true);
     setWebhookStatus("");
     try {
       const res = await fetch("/api/telegram");
       const data = (await res.json()) as StatusBadge & { hasToken: boolean; status: string };
-      setWebhookStatus(data.hasToken ? "Webhook active" : "No token — add TELEGRAM_BOT_TOKEN");
+      setWebhookStatus(data.hasToken ? "WhatsApp webhook active" : "No token — add WHATSAPP_ACCESS_TOKEN");
     } catch {
       setWebhookStatus("Error checking webhook");
     } finally {
@@ -110,26 +111,45 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {/* Telegram webhook */}
+        {/* WhatsApp webhook */}
         <div>
-          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Telegram</h3>
+          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">WhatsApp</h3>
           <Card className="space-y-3">
             <div>
-              <CardTitle>Webhook Setup</CardTitle>
-              <CardDescription>Connect your Telegram bot to receive messages</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle size={16} className="text-emerald-400" />
+                WhatsApp Business Setup
+              </CardTitle>
+              <CardDescription>Connect Meta WhatsApp Business API to receive messages</CardDescription>
             </div>
             <ol className="space-y-1.5 text-xs text-zinc-400 list-decimal list-inside">
-              <li>Create a bot via @BotFather on Telegram</li>
-              <li>Copy your bot token</li>
-              <li>Add <code className="text-violet-300">TELEGRAM_BOT_TOKEN</code> to env</li>
-              <li>Set <code className="text-violet-300">TELEGRAM_AUTHORIZED_CHAT_ID</code> for security</li>
-              <li>Click verify below</li>
+              <li>Go to developers.facebook.com → My Apps → Create App</li>
+              <li>Select &apos;Other&apos; → &apos;Business&apos; → Create</li>
+              <li>Add WhatsApp product to your app</li>
+              <li>Get <code className="text-emerald-300">Phone Number ID</code> and <code className="text-emerald-300">Access Token</code></li>
+              <li>Add both as env vars, plus your phone number</li>
+              <li>Configure webhook in Meta console (see below)</li>
             </ol>
+
+            <div className="bg-zinc-800 rounded-xl p-3 border border-zinc-700">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2 font-medium">Webhook URL</p>
+              <code className="text-xs text-emerald-300 font-mono break-all">
+                https://your-app.kiloapps.io/api/telegram
+              </code>
+            </div>
+
+            <div className="bg-zinc-800 rounded-xl p-3 border border-zinc-700">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2 font-medium">Verify Token</p>
+              <code className="text-xs text-emerald-300 font-mono">
+                nanoclaw_verify_token
+              </code>
+            </div>
+
             <div className="flex gap-2">
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => void registerWebhook()}
+                onClick={() => void checkWebhook()}
                 loading={webhookLoading}
                 className="gap-2"
               >
@@ -161,7 +181,7 @@ export default function SettingsPage() {
                 <Terminal size={16} className="text-violet-400" />
                 Persistent S24 Ultra Daemon
               </CardTitle>
-              <CardDescription>Install NanoClaw as a persistent background service on your phone</CardDescription>
+              <CardDescription>Install NanoClaw CLI and auto-start on your phone</CardDescription>
             </div>
 
             <ol className="space-y-1.5 text-xs text-zinc-400 list-decimal list-inside">
@@ -169,7 +189,7 @@ export default function SettingsPage() {
               <li>Install Termux:Boot from F-Droid</li>
               <li>Open Termux and run the command below</li>
               <li>Follow the setup prompts</li>
-              <li>Bot starts automatically on every reboot</li>
+              <li>CLI starts automatically on every reboot</li>
             </ol>
 
             <div className="bg-zinc-800 rounded-xl p-3 border border-zinc-700">
@@ -247,8 +267,8 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-1.5 text-xs text-zinc-500">
               <div className="flex items-center gap-2">
-                <Bot size={12} />
-                <span>Telegram + Gmail + Web interface</span>
+                <MessageCircle size={12} />
+                <span>WhatsApp Business + Gmail + Web interface</span>
               </div>
               <div className="flex items-center gap-2">
                 <Terminal size={12} />

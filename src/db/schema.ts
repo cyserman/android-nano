@@ -18,7 +18,7 @@ export const tasks = sqliteTable("tasks", {
   completedAt: integer("completed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
-  source: text("source", { enum: ["manual", "telegram", "gmail", "assistant"] }).default("manual"),
+  source: text("source", { enum: ["manual", "telegram", "gmail", "whatsapp", "assistant"] }).default("manual"),
   telegramMessageId: text("telegram_message_id"),
   notes: text("notes"),
 });
@@ -46,7 +46,7 @@ export const opportunities = sqliteTable("opportunities", {
   actionItems: text("action_items"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
-  source: text("source", { enum: ["manual", "telegram", "gmail", "assistant"] }).default("assistant"),
+  source: text("source", { enum: ["manual", "telegram", "gmail", "whatsapp", "assistant"] }).default("assistant"),
 });
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ export const messages = sqliteTable("messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   role: text("role", { enum: ["user", "assistant", "system"] }).notNull(),
   content: text("content").notNull(),
-  channel: text("channel", { enum: ["web", "telegram", "gmail"] }).notNull().default("web"),
+  channel: text("channel", { enum: ["web", "telegram", "gmail", "whatsapp"] }).notNull().default("web"),
   sessionId: text("session_id").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   metadata: text("metadata"),

@@ -209,7 +209,7 @@ function detectSkill(message: string): SkillModule {
 export async function chat(
   userMessage: string,
   sessionId: string,
-  channel: "web" | "telegram" | "gmail" = "web"
+  channel: "web" | "telegram" | "gmail" | "whatsapp" = "web"
 ): Promise<AssistantResponse> {
   // Load recent history for this session
   const history = await db
